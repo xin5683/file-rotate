@@ -291,6 +291,7 @@
     unused_qualifications
 )]
 
+use fs2;
 use chrono::prelude::*;
 use compression::*;
 use std::io::{BufRead, BufReader};
@@ -568,10 +569,40 @@ impl<S: SuffixScheme> FileRotate<S> {
         Ok(newly_created_suffix)
     }
 
+    fn ensure_rotation_space(&mut self) -> io::Result<()> {
+        const MIN_REQUIRED_SPACE: u64 = 100 * 1024 * 1024; // 100MB
+
+        let path = self.basepath.parent().unwrap_or(&self.basepath);
+        let mut available_space = fs2::available_space(path)?;
+
+        if available_space < MIN_REQUIRED_SPACE {
+            // 收集需要删除的文件信息
+            let old_logs: Vec<_> = self.suffixes.iter().rev().cloned().collect();
+            
+            for oldest in old_logs {
+                if available_space >= MIN_REQUIRED_SPACE {
+                    break;
+                }
+                
+                let file_path = oldest.to_path(&self.basepath);
+                if fs::remove_file(&file_path).is_ok() {
+                    self.suffixes.remove(&oldest);
+                    // 更新可用空间
+                    available_space = fs2::available_space(path)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Trigger a log rotation manually. This is mostly intended for use with `ContentLimit::None`
     /// but will work with all content limits.
     pub fn rotate(&mut self) -> io::Result<()> {
         self.ensure_log_directory_exists();
+
+        // 在创建新文件前检查空间
+        self.ensure_rotation_space()?;
 
         let _ = self.file.take();
 
@@ -667,7 +698,7 @@ impl<S: SuffixScheme> Write for FileRotate<S> {
                             }
                         }
                         TimeFrequency::Daily => {
-                            if local.date() > modified.date() {
+                            if local.date_naive() > modified.date_naive() {
                                 self.rotate()?;
                             }
                         }

@@ -10,8 +10,9 @@ keywords= ["log", "rotate", "logrotate"]
 license = "MIT"
 
 [dependencies]
-chrono = { version = "0.4.20", default-features = false, features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 flate2 = "1.0"
+fs2 = "0.4"
 
 [dev-dependencies]
 filetime = "0.2"
