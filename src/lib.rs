@@ -585,6 +585,7 @@ impl<S: SuffixScheme> FileRotate<S> {
                 }
                 
                 let file_path = oldest.to_path(&self.basepath);
+                println!("remove  = {}",file_path.display());
                 if fs::remove_file(&file_path).is_ok() {
                     self.suffixes.remove(&oldest);
                     // 更新可用空间
@@ -670,13 +671,9 @@ impl<S: SuffixScheme> Write for FileRotate<S> {
         let written = buf.len();
         match self.content_limit {
             ContentLimit::Bytes(bytes) => {
-                while self.count + buf.len() > bytes {
-                    let bytes_left = bytes.saturating_sub(self.count);
-                    if let Some(ref mut file) = self.file {
-                        file.write_all(&buf[..bytes_left])?;
-                    }
+                //保证数据的完整性
+                if self.count + buf.len() > bytes {
                     self.rotate()?;
-                    buf = &buf[bytes_left..];
                 }
                 self.count += buf.len();
                 if let Some(ref mut file) = self.file {
