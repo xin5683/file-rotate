@@ -290,7 +290,7 @@
     unused_import_braces,
     unused_qualifications
 )]
-
+use derive_more::Debug;
 use fs2;
 use chrono::prelude::*;
 use compression::*;
@@ -395,6 +395,8 @@ pub struct FileRotate<S: SuffixScheme> {
     suffixes: BTreeSet<SuffixInfo<S::Repr>>,
     #[cfg(unix)]
     mode: Option<u32>,
+    #[debug(ignore)]
+    on_rotate: Option<Box<dyn FnMut(&mut File) -> io::Result<()>>>,
 }
 
 impl<S: SuffixScheme> FileRotate<S> {
@@ -414,6 +416,7 @@ impl<S: SuffixScheme> FileRotate<S> {
         content_limit: ContentLimit,
         compression: Compression,
         #[cfg(unix)] mode: Option<u32>,
+        on_rotate: Option<Box<dyn FnMut(&mut File) -> io::Result<()>>>,
     ) -> Self {
         match content_limit {
             ContentLimit::Bytes(bytes) => {
@@ -443,6 +446,7 @@ impl<S: SuffixScheme> FileRotate<S> {
             suffix_scheme,
             #[cfg(unix)]
             mode,
+            on_rotate
         };
         s.ensure_log_directory_exists();
         s.scan_suffixes();
@@ -487,7 +491,7 @@ impl<S: SuffixScheme> FileRotate<S> {
     fn open_file(&mut self) {
         let mut open_options = OpenOptions::new();
 
-        open_options.read(true).create(true).append(true);
+        open_options.read(true).create(true).append(false);
 
         #[cfg(unix)]
         if let Some(mode) = self.mode {
