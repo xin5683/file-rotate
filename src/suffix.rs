@@ -148,6 +148,8 @@ pub enum DateFrom {
     DateHourAgo,
     /// Date from now.
     Now,
+    /// File creation time
+    FileCreationTime,
 }
 
 /// Append current timestamp as suffix when rotating files.
@@ -236,6 +238,12 @@ impl SuffixScheme for AppendTimestamp {
                 }
                 DateFrom::DateHourAgo => {
                     now = now - Duration::hours(1);
+                }
+                DateFrom::FileCreationTime => {
+                    use std::fs;
+                    let metadata = fs::metadata(_basepath)?;
+                    let system_time = metadata.created()?;
+                    now = system_time.into(); 
                 }
                 _ => {}
             };

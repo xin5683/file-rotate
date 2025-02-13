@@ -290,7 +290,7 @@
     unused_import_braces,
     unused_qualifications
 )]
-
+use derive_more::Debug;
 use fs2;
 use chrono::prelude::*;
 use compression::*;
@@ -395,6 +395,9 @@ pub struct FileRotate<S: SuffixScheme> {
     suffixes: BTreeSet<SuffixInfo<S::Repr>>,
     #[cfg(unix)]
     mode: Option<u32>,
+    min_required_space : u64,
+    #[debug(ignore)]
+    on_rotate: Option<Box<dyn Fn(&PathBuf,usize) -> io::Result<()> + Send + Sync>>,
 }
 
 impl<S: SuffixScheme> FileRotate<S> {
@@ -414,6 +417,8 @@ impl<S: SuffixScheme> FileRotate<S> {
         content_limit: ContentLimit,
         compression: Compression,
         #[cfg(unix)] mode: Option<u32>,
+        min_required_space : u64,
+        on_rotate: Option<Box<dyn Fn(&PathBuf,usize) -> io::Result<()> + Send + Sync>>,
     ) -> Self {
         match content_limit {
             ContentLimit::Bytes(bytes) => {
@@ -443,6 +448,8 @@ impl<S: SuffixScheme> FileRotate<S> {
             suffix_scheme,
             #[cfg(unix)]
             mode,
+            min_required_space,
+            on_rotate
         };
         s.ensure_log_directory_exists();
         s.scan_suffixes();
@@ -487,7 +494,7 @@ impl<S: SuffixScheme> FileRotate<S> {
     fn open_file(&mut self) {
         let mut open_options = OpenOptions::new();
 
-        open_options.read(true).create(true).append(true);
+        open_options.read(true).create(true).write(true);
 
         #[cfg(unix)]
         if let Some(mode) = self.mode {
@@ -495,6 +502,20 @@ impl<S: SuffixScheme> FileRotate<S> {
         }
 
         self.file = open_options.open(&self.basepath).ok();
+
+        /*if let Some(file) = self.file.as_mut() */{
+            if let Some(ref mut callback) = self.on_rotate {
+                let limit_bytes = match self.content_limit {
+                    ContentLimit::Bytes(bytes) => {
+                        bytes
+                    },
+                    _ => 0,
+                };
+
+                callback(&self.basepath,limit_bytes).unwrap();
+            } 
+        }
+
     }
 
     fn scan_suffixes(&mut self) {
@@ -570,17 +591,17 @@ impl<S: SuffixScheme> FileRotate<S> {
     }
 
     fn ensure_rotation_space(&mut self) -> io::Result<()> {
-        const MIN_REQUIRED_SPACE: u64 = 100 * 1024 * 1024; // 100MB
+        
 
         let path = self.basepath.parent().unwrap_or(&self.basepath);
         let mut available_space = fs2::available_space(path)?;
 
-        if available_space < MIN_REQUIRED_SPACE {
+        if available_space < self.min_required_space{
             // 收集需要删除的文件信息
             let old_logs: Vec<_> = self.suffixes.iter().rev().cloned().collect();
             
             for oldest in old_logs {
-                if available_space >= MIN_REQUIRED_SPACE {
+                if available_space >= self.min_required_space {
                     break;
                 }
                 
@@ -663,6 +684,27 @@ impl<S: SuffixScheme> FileRotate<S> {
         }
 
         result
+    }
+    /// 获取下次是否会触发文件轮转
+    ///
+    /// # 参数
+    ///
+    /// * `wr_len` - 要限制的字节长度。
+    ///
+    /// # 返回值
+    ///
+    /// 如果操作成功则返回`true`，否则返回`false`。
+    pub fn limit_bytes(&self ,wr_len:usize)->bool{
+
+        match self.content_limit {
+            ContentLimit::Bytes(bytes) => {
+                if self.count + wr_len > bytes { return true;}
+                else {
+                    return false;
+                }
+            },
+            _ => return false,
+        }
     }
 }
 
